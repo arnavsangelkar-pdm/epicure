@@ -3,6 +3,29 @@
 
 import { EpicureItem, epicureItems } from '@/src/data/epicureItems';
 
+function parseMinutesFromString(value?: string): number | undefined {
+  if (!value) return undefined;
+  // Handle ranges like "30-35 minutes" - use the first number (lower bound)
+  const minuteMatch = value.match(/(\d+)\s*-?\s*minute/i);
+  if (minuteMatch) {
+    return parseInt(minuteMatch[1], 10);
+  }
+  // Handle hours like "2-3 hours" - convert to minutes
+  const hourMatch = value.match(/(\d+)\s*-?\s*hour/i);
+  if (hourMatch) {
+    return parseInt(hourMatch[1], 10) * 60; // Convert hours to minutes (use lower bound)
+  }
+  return undefined;
+}
+
+function parseRequestedMinutes(text: string): number | undefined {
+  const lower = text.toLowerCase();
+  // Match patterns like "20 minute", "20-minute", "20min", "20 min"
+  const match = lower.match(/(\d+)\s*-?\s*min(?:ute)?s?/);
+  if (!match) return undefined;
+  return parseInt(match[1], 10);
+}
+
 export interface SearchQuery {
   text: string;
   mealType?: 'breakfast' | 'lunch' | 'dinner' | 'dessert';
@@ -11,6 +34,7 @@ export interface SearchQuery {
     nutFree?: boolean;
   };
   timeConstraint?: 'quick' | 'medium' | 'any';
+  maxMinutes?: number; // NEW
 }
 
 /**
@@ -29,11 +53,21 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
   const scored = epicureItems.map(item => {
     let score = 0;
     
+    const itemMinutes = parseMinutesFromString(item.timeToMake);
+
+    // HARD filter when user explicitly requests a time limit
+    // Strictly exclude recipes that exceed the requested time (no buffer)
+    if (query.maxMinutes !== undefined && itemMinutes !== undefined) {
+      if (itemMinutes > query.maxMinutes) {
+        return { item, score: 0 };
+      }
+    }
+    
     // Check dietary requirements
     if (query.dietaryNeeds?.glutenFree && !item.glutenFree) return { item, score: 0 };
     if (query.dietaryNeeds?.nutFree && !item.nutFree) return { item, score: 0 };
     
-    // Check meal type
+    // STRICT meal type filtering - exclude products that don't match meal type
     if (query.mealType) {
       const mealTypeMap: Record<string, string[]> = {
         breakfast: ['breakfast'],
@@ -42,18 +76,41 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
         dessert: ['dessert'],
       };
       const relevantTags = mealTypeMap[query.mealType] || [];
-      if (!relevantTags.some(tag => item.tags.includes(tag))) {
-        score -= 10; // Penalize but don't exclude
+      const hasRelevantTag = relevantTags.some(tag => item.tags.includes(tag));
+      
+      // For products: exclude if they don't match the meal type
+      if (item.type === 'product' && !hasRelevantTag) {
+        return { item, score: 0 };
+      }
+      
+      // For recipes: penalize but don't exclude (recipes might be versatile)
+      if (item.type === 'recipe' && !hasRelevantTag) {
+        score -= 15; // Stronger penalty
+      }
+    }
+    
+    // Extract key food keywords from query (chicken, beef, etc.) and exclude mismatches
+    const foodKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'pasta', 'rice', 'vegetable', 'vegetables'];
+    const queryLower = query.text.toLowerCase();
+    const mentionedFoods = foodKeywords.filter(keyword => queryLower.includes(keyword));
+    
+    if (mentionedFoods.length > 0) {
+      const itemText = `${item.name} ${item.description} ${item.tags.join(' ')}`.toLowerCase();
+      const hasMatchingFood = mentionedFoods.some(food => itemText.includes(food));
+      
+      // Exclude items that don't mention the requested food
+      if (!hasMatchingFood) {
+        return { item, score: 0 };
       }
     }
     
     // Time constraint
     if (query.timeConstraint === 'quick') {
-      const quickTime = item.timeToMake?.includes('20') || 
-                       item.timeToMake?.includes('15') ||
-                       item.timeToMake?.includes('5 minutes');
-      if (quickTime) score += 5;
-      else if (item.timeToMake) score -= 3;
+      if (itemMinutes !== undefined && itemMinutes <= 25) {
+        score += 8;
+      } else if (itemMinutes !== undefined) {
+        score -= 5;
+      }
     }
     
     // Tag matching (strong signal)
@@ -89,6 +146,16 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     // Boost bestsellers
     if (item.tags.includes('bestseller')) {
       score += 2;
+    }
+    
+    // Prioritize recipes over products when meal type is specified
+    if (query.mealType && item.type === 'recipe') {
+      score += 5;
+    }
+    
+    // Slight penalty for products when specific meal type is requested
+    if (query.mealType && item.type === 'product') {
+      score -= 3;
     }
     
     return { item, score };
@@ -140,10 +207,15 @@ export function extractDietaryNeeds(text: string): { glutenFree?: boolean; nutFr
  */
 export function extractTimeConstraint(text: string): 'quick' | 'medium' | 'any' {
   const lower = text.toLowerCase();
-  if (lower.includes('quick') || lower.includes('fast') || lower.includes('20 minute') || 
-      lower.includes('15 minute') || lower.includes('minute')) {
-    return 'quick';
+
+  if (lower.includes('quick') || lower.includes('fast')) return 'quick';
+
+  const minutes = parseRequestedMinutes(lower);
+  if (minutes !== undefined) {
+    if (minutes <= 25) return 'quick';
+    if (minutes <= 45) return 'medium';
   }
+
   return 'any';
 }
 
@@ -156,6 +228,7 @@ export function parseQuery(text: string): SearchQuery {
     mealType: extractMealType(text),
     dietaryNeeds: extractDietaryNeeds(text),
     timeConstraint: extractTimeConstraint(text),
+    maxMinutes: parseRequestedMinutes(text), // NEW
   };
 }
 
