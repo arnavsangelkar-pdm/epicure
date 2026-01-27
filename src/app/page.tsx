@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Chat from '@/src/components/Chat';
+import type { EpicureItem } from '@/src/data/epicureItems';
 
 export default function Home() {
   const [error, setError] = useState<string | null>(null);
