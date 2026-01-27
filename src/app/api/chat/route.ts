@@ -34,10 +34,13 @@ Your communication style:
 - Don't be sales-pushy, but gently suggest relevant mixes/seasonings/collections when appropriate
 
 When recommending items:
-- Always mention specific recipe or product names
+- CRITICAL: ONLY mention recipes and products that are listed in the "relevant Epicure recipes/products" section above
+- NEVER invent, make up, or suggest items that are not in the provided list
+- If no items are provided, you can give general cooking advice but do NOT mention specific Epicure product names that weren't provided
+- Always mention specific recipe or product names from the provided list
 - Include time to make when available
 - Highlight dietary benefits (gluten-free, nut-free)
-- Give practical tips (e.g., "Try the Marry Me Chicken mix with chicken breasts and cherry tomatoes for a 20-minute dinner.")
+- Give practical tips using the actual items provided (e.g., "Try the Marry Me Chicken mix with chicken breasts and cherry tomatoes for a 20-minute dinner.")
 
 Important: Always remind users that this is not medical advice and they should check ingredient labels for allergies.
 
@@ -73,16 +76,16 @@ export async function POST(request: NextRequest) {
     // Build context about retrieved items
     let itemsContext = '';
     if (relevantItems.length > 0) {
-      itemsContext = '\n\nHere are some relevant Epicure recipes/products I found:\n';
+      itemsContext = '\n\nHere are the ONLY Epicure recipes/products available for this query:\n';
       relevantItems.forEach((item, idx) => {
         itemsContext += `${idx + 1}. ${item.name} (${item.type}): ${item.description}`;
         if (item.timeToMake) itemsContext += ` Time: ${item.timeToMake}.`;
         if (item.category) itemsContext += ` Category: ${item.category}.`;
         itemsContext += `\n`;
       });
-      itemsContext += '\nUse these specific items in your response when relevant.';
+      itemsContext += '\nCRITICAL INSTRUCTION: You MUST only mention these specific items in your response. Do NOT invent, create, or suggest any other Epicure products or recipes that are not in this list. If you want to suggest something similar, use one of the items from this list and adapt your suggestion accordingly.';
     } else {
-      itemsContext = '\n\nNo specific Epicure items matched this query, but you can still provide helpful general cooking advice in Epicure\'s warm, practical tone.';
+      itemsContext = '\n\nNo specific Epicure items matched this query. You can provide helpful general cooking advice in Epicure\'s warm, practical tone, but do NOT mention specific Epicure product names that weren\'t provided above.';
     }
 
     // Build conversation history for context

@@ -95,7 +95,7 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     
     // Extract key food keywords from query (chicken, beef, etc.) and exclude mismatches
     // This is a STRICT filter - if user asks for a specific protein/food, only show items with that food
-    const foodKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'pasta', 'rice', 'vegetable', 'vegetables', 'seafood', 'lamb', 'shrimp'];
+    const foodKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'pasta', 'rice', 'vegetable', 'vegetables', 'seafood', 'lamb', 'shrimp', 'taco', 'tacos'];
     const queryLower = query.text.toLowerCase();
     
     // Find all food keywords mentioned in the query
@@ -182,6 +182,14 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     // Category matching
     if (item.category && searchText.includes(item.category.toLowerCase())) {
       score += 5;
+      hasTextMatch = true;
+    }
+    
+    // Match "group", "crowd", "people", "family" queries with "family-friendly" items
+    const groupKeywords = ['group', 'crowd', 'people', 'family', 'gathering', 'party', 'many'];
+    const hasGroupKeyword = groupKeywords.some(keyword => searchText.includes(keyword));
+    if (hasGroupKeyword && item.tags.includes('family-friendly')) {
+      score += 12; // Strong boost for family-friendly items when group is mentioned
       hasTextMatch = true;
     }
     
