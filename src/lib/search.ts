@@ -46,12 +46,16 @@ export interface SearchQuery {
  * - Meal type
  */
 export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[] {
-  const searchText = query.text.toLowerCase();
+  const searchText = query.text.toLowerCase().trim();
   const words = searchText.split(/\s+/).filter(w => w.length > 2); // Filter out short words
+  
+  // Track if query is very short or generic (allow more lenient matching)
+  const isGenericQuery = searchText.length < 3 || words.length === 0;
   
   // Score each item
   const scored = epicureItems.map(item => {
     let score = 0;
+    let hasTextMatch = false; // Track if there's any actual text match
     
     const itemMinutes = parseMinutesFromString(item.timeToMake);
 
@@ -59,13 +63,13 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     // Strictly exclude recipes that exceed the requested time (no buffer)
     if (query.maxMinutes !== undefined && itemMinutes !== undefined) {
       if (itemMinutes > query.maxMinutes) {
-        return { item, score: 0 };
+        return { item, score: 0, hasTextMatch: false };
       }
     }
     
     // Check dietary requirements
-    if (query.dietaryNeeds?.glutenFree && !item.glutenFree) return { item, score: 0 };
-    if (query.dietaryNeeds?.nutFree && !item.nutFree) return { item, score: 0 };
+    if (query.dietaryNeeds?.glutenFree && !item.glutenFree) return { item, score: 0, hasTextMatch: false };
+    if (query.dietaryNeeds?.nutFree && !item.nutFree) return { item, score: 0, hasTextMatch: false };
     
     // STRICT meal type filtering - exclude products that don't match meal type
     if (query.mealType) {
@@ -80,7 +84,7 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
       
       // For products: exclude if they don't match the meal type
       if (item.type === 'product' && !hasRelevantTag) {
-        return { item, score: 0 };
+        return { item, score: 0, hasTextMatch: false };
       }
       
       // For recipes: penalize but don't exclude (recipes might be versatile)
@@ -90,43 +94,79 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     }
     
     // Extract key food keywords from query (chicken, beef, etc.) and exclude mismatches
-    const foodKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'pasta', 'rice', 'vegetable', 'vegetables'];
+    // This is a STRICT filter - if user asks for a specific protein/food, only show items with that food
+    const foodKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'pasta', 'rice', 'vegetable', 'vegetables', 'seafood', 'lamb', 'shrimp'];
     const queryLower = query.text.toLowerCase();
-    const mentionedFoods = foodKeywords.filter(keyword => queryLower.includes(keyword));
+    
+    // Find all food keywords mentioned in the query
+    const mentionedFoods = foodKeywords.filter(keyword => {
+      // Use word boundaries to avoid partial matches (e.g., "chicken" shouldn't match "chickens" incorrectly, but should match)
+      // For simplicity, we'll check if the keyword appears as a whole word or as part of common food terms
+      const regex = new RegExp(`\\b${keyword}\\w*`, 'i');
+      return regex.test(queryLower);
+    });
     
     if (mentionedFoods.length > 0) {
-      const itemText = `${item.name} ${item.description} ${item.tags.join(' ')}`.toLowerCase();
-      const hasMatchingFood = mentionedFoods.some(food => itemText.includes(food));
+      // Check item name, description, tags, and category for the mentioned foods
+      const itemText = `${item.name} ${item.description} ${item.tags.join(' ')} ${item.category || ''}`.toLowerCase();
       
-      // Exclude items that don't mention the requested food
+      // Check if item contains ANY of the mentioned foods
+      const hasMatchingFood = mentionedFoods.some(food => {
+        // Use word boundary matching to avoid partial matches
+        const regex = new RegExp(`\\b${food}\\w*`, 'i');
+        return regex.test(itemText);
+      });
+      
+      // STRICT: Exclude items that don't mention the requested food
       if (!hasMatchingFood) {
-        return { item, score: 0 };
+        return { item, score: 0, hasTextMatch: false };
       }
-    }
-    
-    // Time constraint
-    if (query.timeConstraint === 'quick') {
-      if (itemMinutes !== undefined && itemMinutes <= 25) {
-        score += 8;
-      } else if (itemMinutes !== undefined) {
-        score -= 5;
+      
+      // Also check for conflicting proteins - if query mentions one protein, exclude items with different proteins
+      // This prevents "beef" query from showing "chicken" items
+      const proteinKeywords = ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'seafood', 'lamb', 'shrimp'];
+      const mentionedProteins = mentionedFoods.filter(food => proteinKeywords.includes(food));
+      
+      if (mentionedProteins.length > 0) {
+        // Check if item mentions a different protein
+        const itemProteins = proteinKeywords.filter(protein => {
+          const regex = new RegExp(`\\b${protein}\\w*`, 'i');
+          return regex.test(itemText);
+        });
+        
+        // If item has a protein that's different from what was requested, exclude it
+        if (itemProteins.length > 0) {
+          const hasRequestedProtein = mentionedProteins.some(reqProtein => 
+            itemProteins.some(itemProtein => itemProtein === reqProtein)
+          );
+          
+          if (!hasRequestedProtein) {
+            // Item has a different protein than requested - exclude it
+            return { item, score: 0, hasTextMatch: false };
+          }
+        }
       }
+      
+      hasTextMatch = true; // Food keyword match counts as text match
     }
     
     // Tag matching (strong signal)
     words.forEach(word => {
       if (item.tags.some(tag => tag.toLowerCase().includes(word))) {
         score += 10;
+        hasTextMatch = true;
       }
     });
     
     // Name matching (very strong signal)
     if (item.name.toLowerCase().includes(searchText)) {
       score += 20;
+      hasTextMatch = true;
     } else {
       words.forEach(word => {
         if (item.name.toLowerCase().includes(word)) {
           score += 8;
+          hasTextMatch = true;
         }
       });
     }
@@ -135,35 +175,57 @@ export function searchItems(query: SearchQuery, limit: number = 5): EpicureItem[
     words.forEach(word => {
       if (item.description.toLowerCase().includes(word)) {
         score += 3;
+        hasTextMatch = true;
       }
     });
     
     // Category matching
     if (item.category && searchText.includes(item.category.toLowerCase())) {
       score += 5;
+      hasTextMatch = true;
     }
     
-    // Boost bestsellers
-    if (item.tags.includes('bestseller')) {
-      score += 2;
+    // Only apply bonus points if there's a text match OR if query is very generic
+    // This prevents items from appearing just because they're bestsellers or quick
+    if (hasTextMatch || isGenericQuery) {
+      // Boost bestsellers
+      if (item.tags.includes('bestseller')) {
+        score += 2;
+      }
+      
+      // Time constraint (only boost if there's a match)
+      if (query.timeConstraint === 'quick') {
+        if (itemMinutes !== undefined && itemMinutes <= 25) {
+          score += 8;
+        } else if (itemMinutes !== undefined) {
+          score -= 5;
+        }
+      }
+      
+      // Prioritize recipes over products when meal type is specified
+      if (query.mealType && item.type === 'recipe') {
+        score += 5;
+      }
+      
+      // Slight penalty for products when specific meal type is requested
+      if (query.mealType && item.type === 'product') {
+        score -= 3;
+      }
     }
     
-    // Prioritize recipes over products when meal type is specified
-    if (query.mealType && item.type === 'recipe') {
-      score += 5;
-    }
-    
-    // Slight penalty for products when specific meal type is requested
-    if (query.mealType && item.type === 'product') {
-      score -= 3;
-    }
-    
-    return { item, score };
+    return { item, score, hasTextMatch };
   });
   
-  // Filter out zero scores and sort by score
+  // Filter: require minimum score AND (text match OR generic query)
+  // This ensures items only appear if they actually match the query
   const filtered = scored
-    .filter(({ score }) => score > 0)
+    .filter(({ score, hasTextMatch }) => {
+      if (score <= 0) return false;
+      // For non-generic queries, require at least one text match
+      if (!isGenericQuery && !hasTextMatch) return false;
+      // Require minimum score threshold to avoid very weak matches
+      return score >= 3;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
     .map(({ item }) => item);
