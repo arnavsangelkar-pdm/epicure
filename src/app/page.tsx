@@ -2,12 +2,9 @@
 
 import { useState } from 'react';
 import Chat from '@/src/components/Chat';
-import RecommendationSidebar from '@/src/components/RecommendationSidebar';
-import { EpicureItem } from '@/src/data/epicureItems';
 
 export default function Home() {
   const [error, setError] = useState<string | null>(null);
-  const [recommendations, setRecommendations] = useState<EpicureItem[]>([]);
 
   const handleSendMessage = async (message: string): Promise<{ content: string; items: EpicureItem[] }> => {
     setError(null);
@@ -96,12 +93,10 @@ export default function Home() {
           </div>
         )}
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(260px,1.2fr)]">
+        <section>
           <Chat 
             onSendMessage={handleSendMessage}
-            onRecommendationsChange={setRecommendations}
           />
-          <RecommendationSidebar items={recommendations} />
         </section>
       </main>
 

@@ -128,17 +128,32 @@ export async function POST(request: NextRequest) {
     let assistantMessage = completion.choices[0]?.message?.content || 
       "I'm sorry, I couldn't generate a response. Please try again.";
 
+    // Filter items to only include those actually mentioned in the response
+    const mentionedItems: EpicureItem[] = [];
+    if (relevantItems.length > 0) {
+      const responseLower = assistantMessage.toLowerCase();
+      
+      // Check which items from relevantItems are actually mentioned in the response
+      for (const item of relevantItems) {
+        const itemNameLower = item.name.toLowerCase();
+        // Check if the item name appears in the response
+        if (responseLower.includes(itemNameLower)) {
+          mentionedItems.push(item);
+        }
+      }
+    }
+
     // Post-process validation: Check if response mentions any items not in the provided list
     if (relevantItems.length > 0) {
       const allowedItemNames = relevantItems.map(item => item.name.toLowerCase());
       const allItemNames = epicureItems.map(item => item.name.toLowerCase());
       
       // Check if response mentions any Epicure items that aren't in the allowed list
-      const mentionedItems = allItemNames.filter(itemName => 
+      const mentionedItemNames = allItemNames.filter(itemName => 
         assistantMessage.toLowerCase().includes(itemName)
       );
       
-      const invalidItems = mentionedItems.filter(itemName => 
+      const invalidItems = mentionedItemNames.filter(itemName => 
         !allowedItemNames.includes(itemName)
       );
       
@@ -150,10 +165,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Return response with relevant items
+    // Return response with only the items actually mentioned in the response
     return NextResponse.json({
       content: assistantMessage,
-      items: relevantItems,
+      items: mentionedItems,
     });
   } catch (error: any) {
     console.error('Chat API error:', error);

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { EpicureItem } from '@/src/data/epicureItems';
 import MessageBubble from './MessageBubble';
 import RecipeCard from './RecipeCard';
+import ReactMarkdown from 'react-markdown';
 
 export interface Message {
   id: string;
@@ -14,10 +15,9 @@ export interface Message {
 
 interface ChatProps {
   onSendMessage: (message: string) => Promise<{ content: string; items: EpicureItem[] }>;
-  onRecommendationsChange?: (items: EpicureItem[]) => void;
 }
 
-export default function Chat({ onSendMessage, onRecommendationsChange }: ChatProps) {
+export default function Chat({ onSendMessage }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -30,20 +30,6 @@ export default function Chat({ onSendMessage, onRecommendationsChange }: ChatPro
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Collect all recommended items from messages
-  const allRecommendations = messages
-    .filter(m => m.items && m.items.length > 0)
-    .flatMap(m => m.items || [])
-    .filter((item, index, self) => 
-      index === self.findIndex(t => t.id === item.id)
-    ); // Remove duplicates
-
-  // Notify parent of recommendations
-  useEffect(() => {
-    if (onRecommendationsChange) {
-      onRecommendationsChange(allRecommendations);
-    }
-  }, [allRecommendations, onRecommendationsChange]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -98,11 +84,18 @@ export default function Chat({ onSendMessage, onRecommendationsChange }: ChatPro
         {messages.map((message) => (
           <div key={message.id} className="space-y-2">
             <MessageBubble role={message.role}>
-              {message.content.split('\n').map((line, i) => (
-                <p key={i} className={i > 0 ? 'mt-2' : ''}>
-                  {line}
-                </p>
-              ))}
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                  em: ({ children }) => <em className="italic">{children}</em>,
+                  ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2">{children}</li>,
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
             </MessageBubble>
             {message.items && message.items.length > 0 && (
               <div className="mt-2 space-y-2">
